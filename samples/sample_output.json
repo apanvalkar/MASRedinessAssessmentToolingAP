@@ -1,0 +1,84 @@
+{
+  "tool": "mas9-source-readiness",
+  "version": "1.2.2",
+  "runTimestamp": "2026-02-03T03:11:36.727477Z",
+  "inputs": {
+    "dbType": "DB2",
+    "appServer": "WebSphere",
+    "os": "Linux",
+    "schema": "MAXIMO",
+    "smpHome": "/opt/IBM/SMP"
+  },
+  "summary": {
+    "overallRag": "AMBER",
+    "highestRiskCategory": "Automation Scripts",
+    "counts": {
+      "checksRun": 42,
+      "findingsTotal": 18,
+      "red": 3,
+      "amber": 7,
+      "green": 32
+    }
+  },
+  "categories": [
+    {
+      "name": "Automation Scripts",
+      "rag": "RED",
+      "topFindings": [
+        {
+          "id": "AS-02",
+          "title": "Manual commit()/rollback()/save()",
+          "count": 4
+        },
+        {
+          "id": "AS-05",
+          "title": "Direct JDBC usage in scripts",
+          "count": 1
+        },
+        {
+          "id": "AS-06",
+          "title": "Workflow engine manipulation",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "Workflow",
+      "rag": "AMBER",
+      "topFindings": [
+        {
+          "id": "WF-02",
+          "title": "High node count per workflow",
+          "count": 6
+        },
+        {
+          "id": "WF-05",
+          "title": "Scripted workflow actions",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "Java Customisations",
+      "rag": "AMBER",
+      "topFindings": [
+        {
+          "id": "JV-02",
+          "title": "Unclosed resources",
+          "count": 2
+        },
+        {
+          "id": "JV-04",
+          "title": "Unsafe concurrency patterns",
+          "count": 1
+        }
+      ]
+    }
+  ],
+  "recommendedNextActions": [
+    "Refactor scripts flagged AS-02 to remove manual transaction control and retest under MAS9.",
+    "Replace direct JDBC usage (AS-05) with MBO / Integration Framework alternatives.",
+    "Review workflows with highest node count and scripted actions; prioritise for SIT regression.",
+    "Address resource-leak findings in custom Java; adopt try-with-resources and retest."
+  ]
+}

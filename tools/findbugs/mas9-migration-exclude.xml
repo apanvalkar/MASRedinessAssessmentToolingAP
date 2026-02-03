@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!--
+    MAS9 Migration FindBugs/SpotBugs Filter (Exclude)
+    Purpose:
+      Reduce low-value noise so teams focus on migration-risk findings first.
+    Guidance:
+      Start with this exclude list, then tune per customer codebase.
+  -->
+
+  <!-- Common low-signal patterns for legacy Maximo custom codebases -->
+  <Match>
+    <Bug pattern="URF_UNREAD_FIELD"/>
+  </Match>
+  <Match>
+    <Bug pattern="UUF_UNUSED_FIELD"/>
+  </Match>
+  <Match>
+    <Bug pattern="DLS_DEAD_LOCAL_STORE"/>
+  </Match>
+  <Match>
+    <Bug pattern="DM_DEFAULT_ENCODING"/>
+  </Match>
+  <Match>
+    <Bug pattern="NM_METHOD_NAMING_CONVENTION"/>
+  </Match>
+  <Match>
+    <Bug pattern="NM_FIELD_NAMING_CONVENTION"/>
+  </Match>
+
+  <!-- Ignore generated/compiled outputs if present in scans -->
+  <Match>
+    <Source name="~.*\/target\/.*"/>
+  </Match>
+  <Match>
+    <Source name="~.*\/build\/.*"/>
+  </Match>
+</FindBugsFilter>

@@ -1,0 +1,1 @@
+# Roadmap\n\n- Reports inventory (BIRT)\n- Executive DOCX/PDF/PPT generation from JSON\n- Separate target readiness mode for OpenShift/DNS/storage\n

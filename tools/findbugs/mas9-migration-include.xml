@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+  <!--
+    MAS9 Migration-Focused FindBugs/SpotBugs Filter (Include)
+    Purpose:
+      Highlight code patterns that commonly cause runtime failures or operational issues when moving
+      custom Maximo 7.6.1.3 Java to MAS9 (containerised, stricter TLS/security posture, newer JDKs).
+    Notes:
+      - This is a *signal* list. It will not catch all migration issues.
+      - Use with SpotBugs (recommended successor to FindBugs) or FindBugs if still in use.
+  -->
+
+  <!-- Null-safety / NPE risk: container restarts often amplify latent NPEs -->
+  <Match>
+    <Bug pattern="NP_NULL_ON_SOME_PATH"/>
+  </Match>
+  <Match>
+    <Bug pattern="NP_NULL_PARAM_DEREF"/>
+  </Match>
+  <Match>
+    <Bug pattern="NP_STORE_INTO_NONNULL_FIELD"/>
+  </Match>
+
+  <!-- Resource management: leaks become painful in pods (FD/connection exhaustion) -->
+  <Match>
+    <Bug pattern="OS_OPEN_STREAM"/>
+  </Match>
+  <Match>
+    <Bug pattern="ODR_OPEN_DATABASE_RESOURCE"/>
+  </Match>
+  <Match>
+    <Bug pattern="OBL_UNSATISFIED_OBLIGATION"/>
+  </Match>
+
+  <!-- Concurrency / lifecycle: thread misuse & races are harder in k8s -->
+  <Match>
+    <Bug pattern="IS2_INCONSISTENT_SYNC"/>
+  </Match>
+  <Match>
+    <Bug pattern="IS_FIELD_NOT_GUARDED"/>
+  </Match>
+  <Match>
+    <Bug pattern="LI_LAZY_INIT_STATIC"/>
+  </Match>
+
+  <!-- Classloading/Reflection: brittle patterns can break across images & JDK upgrades -->
+  <Match>
+    <Bug pattern="DMI_CLASSLOADER"/>
+  </Match>
+  <Match>
+    <Bug pattern="DP_DO_INSIDE_DO_PRIVILEGED"/>
+  </Match>
+
+  <!-- Serialization: compatibility / stability across upgrades -->
+  <Match>
+    <Bug pattern="SE_BAD_FIELD"/>
+  </Match>
+  <Match>
+    <Bug pattern="SE_NO_SERIALVERSIONID"/>
+  </Match>
+
+  <!-- Hard-coded platform assumptions: file paths, separators, etc. -->
+  <Match>
+    <Bug pattern="DMI_HARDCODED_ABSOLUTE_FILENAME"/>
+  </Match>
+
+  <!-- Security/TLS/crypto footguns -->
+  <Match>
+    <Bug pattern="WEAK_MESSAGE_DIGEST_MD5"/>
+  </Match>
+  <Match>
+    <Bug pattern="WEAK_MESSAGE_DIGEST_SHA1"/>
+  </Match>
+  <Match>
+    <Bug pattern="HARD_CODE_PASSWORD"/>
+  </Match>
+
+  <!-- Potential JDBC misuse -->
+  <Match>
+    <Bug pattern="SQL_NONCONSTANT_STRING_PASSED_TO_EXECUTE"/>
+  </Match>
+</FindBugsFilter>
