@@ -119,13 +119,13 @@ drivers/
 ### Step 3: Run the Assessment
 
 ```bash
-java -jar target/mas9-readiness.jar --help
+java -jar target/mas9-source-readiness-1.2.2.jar --help
 ```
 
 Example:
 
 ```bash
-java -jar target/mas9-readiness.jar   --dbType db2   --dbHost db.company.local   --dbPort 50000   --dbName MAXDB   --dbSchema MAXIMO   --dbUser readonly_user   --dbPassword ******   --smpHome /opt/IBM/SMP   --appServer websphere   --os linux   --driversDir ./drivers   --outputDir ./out
+java -jar target/mas9-source-readiness-1.2.2.jar   --dbType db2   --dbHost db.company.local   --dbPort 50000   --dbName MAXDB   --dbSchema MAXIMO   --dbUser readonly_user   --dbPassword ******   --smpHome /opt/IBM/SMP   --appServer websphere   --os linux   --driversDir ./drivers   --outputDir ./out
 ```
 
 ---
