@@ -83,7 +83,7 @@ public final class SmpVersionAlignmentCheck implements Check {
 
     static String extractVersion(String text) {
         if (text == null) return null;
-        Pattern p = Pattern.compile("(\d+\.\d+\.\d+\.\d+)");
+        Pattern p = Pattern.compile("(\\d+\\.\\d+\\.\\d+\\.\\d+)");
         Matcher m = p.matcher(text);
         if (m.find()) return m.group(1);
         return null;

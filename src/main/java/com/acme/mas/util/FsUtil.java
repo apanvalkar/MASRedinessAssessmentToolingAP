@@ -35,7 +35,7 @@ public final class FsUtil {
     public static Map<String, String> parseProperties(String text) {
         Map<String, String> props = new HashMap<>();
         if (text == null) return props;
-        for (String line : text.split("\R")) {
+        for (String line : text.split("\r")) {
             String ln = line.trim();
             if (ln.isEmpty() || ln.startsWith("#") || !ln.contains("=")) continue;
             int idx = ln.indexOf('=');
