@@ -27,8 +27,9 @@
 from psdi.server import MXServer
 from java.util import Date, TimeZone
 from java.text import SimpleDateFormat
-import re
-import json
+from java.util.regex import Pattern
+
+from com.ibm.json.java import JSONObject, JSONArray
 
 # ------------------- Configuration -------------------
 OUTPUT_MODE = "LOG"   # "LOG" or "FILE"
@@ -54,90 +55,191 @@ def snippet_around(text, start, end, window):
     e = min(len(text), end + window)
     return text[s:e].replace("\n", " ").replace("\r", " ")
 
+def _is_dict(x):
+    try:
+        return isinstance(x, dict)
+    except:
+        return False
+
+def _is_list(x):
+    try:
+        return isinstance(x, list)
+    except:
+        return False
+
+def to_ibm_json(val):
+    """Convert Python primitives/dict/list into com.ibm.json.java JSONObject/JSONArray."""
+    if _is_dict(val):
+        o = JSONObject()
+        for k, v in val.items():
+            o.put(str(k), to_ibm_json(v))
+        return o
+
+    if _is_list(val):
+        a = JSONArray()
+        for v in val:
+            a.add(to_ibm_json(v))
+        return a
+
+    return val
+
+def serialize_ibm_json(obj):
+    """Serialize IBM JSONObject/JSONArray to a JSON string."""
+    try:
+        return service.jsonToString(obj)
+    except:
+        try:
+            return obj.serialize()
+        except:
+            return str(obj)
+
+# ------------------- Java Regex helpers -------------------
+def jflags(*flags):
+    """Combine java.util.regex.Pattern flags."""
+    f = 0
+    for x in flags:
+        f = f | x
+    return f
+
+def compile_pattern(expr, ignore_case=True):
+    if ignore_case:
+        return Pattern.compile(expr, jflags(Pattern.CASE_INSENSITIVE))
+    return Pattern.compile(expr)
+
+def find_matches(pattern, text):
+    """
+    Returns list of (start, end) offsets for all matches.
+    Pattern is a compiled java.util.regex.Pattern.
+    """
+    out = []
+    if not text:
+        return out
+    m = pattern.matcher(text)
+    while m.find():
+        out.append((m.start(), m.end()))
+    return out
+
 # ------------------- MAS9 Risk Checks -------------------
 # Each entry:
-# (check_id, pattern_name, regex, bucket, default_severity, description)
+# (check_id, pattern_name, java_pattern, bucket, default_severity, description)
 CHECKS = [
-    # AS-01: MXServer singleton usage
-    ("AS-01", "mxserver_singleton", re.compile(r"\bMXServer\s*\.\s*getMXServer\s*\(", re.I),
+    ("AS-01", "mxserver_singleton",
+     compile_pattern(r"\bMXServer\s*\.\s*getMXServer\s*\("),
      "runtime_state", "AMBER",
      "Direct MXServer singleton usage (multi-pod/runtime state risk in MAS9)."),
 
-    # AS-09: MXServer.getMXServer().getMboSet(...) (high risk when unbounded)
     ("AS-09", "mxserver_getmboset_chain",
-     re.compile(r"\bMXServer\s*\.\s*getMXServer\s*\(\s*\)\s*\.\s*getMboSet\s*\(", re.I),
+     compile_pattern(r"\bMXServer\s*\.\s*getMXServer\s*\(\s*\)\s*\.\s*getMboSet\s*\("),
      "memory_db", "AMBER",
      "MXServer.getMXServer().getMboSet(...) usage; can be unbounded and memory-heavy in MAS9 pods."),
 
-    # System user context (used as signal for AS-09 severity)
-    ("SIG-01", "system_userinfo", re.compile(r"\bgetSystemUserInfo\s*\(", re.I),
-     "signals", "INFO", "Uses system user context (amplifies unbounded fetch risk)."),
+    ("SIG-01", "system_userinfo",
+     compile_pattern(r"\bgetSystemUserInfo\s*\("),
+     "signals", "INFO",
+     "Uses system user context (amplifies unbounded fetch risk)."),
 
-    # Filtering signals (reduce AS-09 severity if present)
-    ("SIG-02", "set_where", re.compile(r"\bsetWhere\s*\(", re.I),
-     "signals", "INFO", "Script applies setWhere() filter."),
-    ("SIG-03", "set_qbe", re.compile(r"\bsetQbe\s*\(", re.I),
-     "signals", "INFO", "Script applies setQbe() filter."),
-    ("SIG-04", "set_maxrows", re.compile(r"\bsetMaxRows\s*\(", re.I),
-     "signals", "INFO", "Script limits rows via setMaxRows()."),
-    ("SIG-05", "reset_call", re.compile(r"\breset\s*\(", re.I),
-     "signals", "INFO", "Script resets MboSet after filters."),
-    ("SIG-06", "sqlformat", re.compile(r"\bSqlFormat\s*\(", re.I),
-     "signals", "INFO", "Uses SqlFormat (often paired with setWhere)."),
+    ("SIG-02", "set_where",
+     compile_pattern(r"\bsetWhere\s*\("),
+     "signals", "INFO",
+     "Script applies setWhere() filter."),
+    ("SIG-03", "set_qbe",
+     compile_pattern(r"\bsetQbe\s*\("),
+     "signals", "INFO",
+     "Script applies setQbe() filter."),
+    ("SIG-04", "set_maxrows",
+     compile_pattern(r"\bsetMaxRows\s*\("),
+     "signals", "INFO",
+     "Script limits rows via setMaxRows()."),
+    ("SIG-05", "reset_call",
+     compile_pattern(r"\breset\s*\("),
+     "signals", "INFO",
+     "Script resets MboSet after filters."),
+    ("SIG-06", "sqlformat",
+     compile_pattern(r"\bSqlFormat\s*\("),
+     "signals", "INFO",
+     "Uses SqlFormat (often paired with setWhere)."),
 
-    # Iteration / heavy operations signals
-    ("SIG-07", "iteration", re.compile(r"\bmoveFirst\s*\(|\bmoveNext\s*\(", re.I),
-     "signals", "INFO", "Iterates through MboSet (can be heavy when unbounded)."),
-    ("SIG-08", "count_call", re.compile(r"\bcount\s*\(", re.I),
-     "signals", "INFO", "Calls count() (can be expensive when unbounded)."),
+    # Note: Java Pattern uses | fine; \b groups OK.
+    ("SIG-07", "iteration",
+     compile_pattern(r"\bmoveFirst\s*\(|\bmoveNext\s*\("),
+     "signals", "INFO",
+     "Iterates through MboSet (can be heavy when unbounded)."),
+    ("SIG-08", "count_call",
+     compile_pattern(r"\bcount\s*\("),
+     "signals", "INFO",
+     "Calls count() (can be expensive when unbounded)."),
 
-    # OS / process execution
-    ("AS-07", "runtime_exec", re.compile(r"Runtime\.getRuntime\(\)\.exec\(", re.I),
-     "os_exec", "RED", "Executes OS process (not suitable in locked-down containers)."),
-    ("AS-07", "processbuilder", re.compile(r"ProcessBuilder\(", re.I),
-     "os_exec", "RED", "Executes OS process via ProcessBuilder."),
+    ("AS-07", "runtime_exec",
+     compile_pattern(r"Runtime\.getRuntime\(\)\.exec\("),
+     "os_exec", "RED",
+     "Executes OS process (not suitable in locked-down containers)."),
+    ("AS-07", "processbuilder",
+     compile_pattern(r"ProcessBuilder\("),
+     "os_exec", "RED",
+     "Executes OS process via ProcessBuilder."),
 
-    # Threading / sleeps
-    ("AS-03", "thread_sleep", re.compile(r"Thread\.sleep\(", re.I),
-     "threading", "RED", "Thread sleep in automation script (pod lifecycle/retry risk)."),
-    ("AS-03", "new_thread", re.compile(r"new\s+Thread\(", re.I),
-     "threading", "RED", "Creates new Thread (not supported / unsafe in container runtime)."),
+    ("AS-03", "thread_sleep",
+     compile_pattern(r"Thread\.sleep\("),
+     "threading", "RED",
+     "Thread sleep in automation script (pod lifecycle/retry risk)."),
+    ("AS-03", "new_thread",
+     compile_pattern(r"new\s+Thread\("),
+     "threading", "RED",
+     "Creates new Thread (not supported / unsafe in container runtime)."),
 
-    # Filesystem assumptions / writes
-    ("AS-04", "hardcoded_windows_path", re.compile(r"[A-Za-z]:\\", re.I),
-     "filesystem", "AMBER", "Hardcoded Windows path in script."),
-    ("AS-04", "hardcoded_unix_path", re.compile(r"/(opt|var|etc|home)/", re.I),
-     "filesystem", "AMBER", "Hardcoded Unix path in script."),
-    ("AS-04", "file_write", re.compile(r"\b(open\s*\(|File(Output|Writer)?|FileOutputStream)\b", re.I),
-     "filesystem", "RED", "Potential file write/IO; pods are ephemeral unless using PVs."),
+    ("AS-04", "hardcoded_windows_path",
+     compile_pattern(r"[A-Za-z]:\\"),
+     "filesystem", "AMBER",
+     "Hardcoded Windows path in script."),
+    ("AS-04", "hardcoded_unix_path",
+     compile_pattern(r"/(opt|var|etc|home)/"),
+     "filesystem", "AMBER",
+     "Hardcoded Unix path in script."),
+    ("AS-04", "file_write",
+     compile_pattern(r"\b(open\s*\(|File(Output|Writer)?|FileOutputStream)\b"),
+     "filesystem", "RED",
+     "Potential file write/IO; pods are ephemeral unless using PVs."),
 
-    # Network calls (heuristic)
-    ("AS-10", "urlopen", re.compile(r"\burlopen\s*\(", re.I),
-     "network", "AMBER", "Network call detected; ensure timeouts, DNS and retries are MAS-safe."),
-    ("AS-10", "httpclient", re.compile(r"HttpURLConnection|requests\.", re.I),
-     "network", "AMBER", "HTTP client usage detected; ensure timeouts/retry/idempotency."),
+    ("AS-10", "urlopen",
+     compile_pattern(r"\burlopen\s*\("),
+     "network", "AMBER",
+     "Network call detected; ensure timeouts, DNS and retries are MAS-safe."),
+    ("AS-10", "httpclient",
+     compile_pattern(r"HttpURLConnection|requests\."),
+     "network", "AMBER",
+     "HTTP client usage detected; ensure timeouts/retry/idempotency."),
 
-    # Secrets
-    ("AS-08", "password_literal", re.compile(r"password\s*=\s*['\"]", re.I),
-     "secrets", "RED", "Hard-coded password/secret pattern detected."),
+    ("AS-08", "password_literal",
+     compile_pattern(r"password\s*=\s*['\"]"),
+     "secrets", "RED",
+     "Hard-coded password/secret pattern detected."),
 
-    # SQL strings / direct JDBC heuristics
-    ("AS-05", "sql_keywords", re.compile(r"\bSELECT\b|\bUPDATE\b|\bINSERT\b|\bDELETE\b", re.I),
-     "sql", "AMBER", "SQL keywords found (may indicate direct SQL; validate usage)."),
-    ("AS-05", "jdbc", re.compile(r"\bjava\.sql\.|\bPreparedStatement\b|\bcreateStatement\b", re.I),
-     "sql", "RED", "Direct JDBC usage detected (connection pool & transactional risk)."),
+    ("AS-05", "sql_keywords",
+     compile_pattern(r"\bSELECT\b|\bUPDATE\b|\bINSERT\b|\bDELETE\b"),
+     "sql", "AMBER",
+     "SQL keywords found (may indicate direct SQL; validate usage)."),
+    ("AS-05", "jdbc",
+     compile_pattern(r"\bjava\.sql\.|\bPreparedStatement\b|\bcreateStatement\b"),
+     "sql", "RED",
+     "Direct JDBC usage detected (connection pool & transactional risk)."),
 
-    # Transaction boundary heuristics (strong MAS9 risk)
-    ("AS-02", "manual_commit", re.compile(r"\bcommit\s*\(", re.I),
-     "transactions", "RED", "Manual commit() detected; violates managed transaction boundaries."),
-    ("AS-02", "manual_rollback", re.compile(r"\brollback\s*\(", re.I),
-     "transactions", "RED", "Manual rollback() detected; violates managed transaction boundaries."),
-    ("AS-02", "mbo_save", re.compile(r"\.save\s*\(", re.I),
-     "transactions", "AMBER", "save() call detected; validate it is framework-safe and bounded."),
+    ("AS-02", "manual_commit",
+     compile_pattern(r"\bcommit\s*\("),
+     "transactions", "RED",
+     "Manual commit() detected; violates managed transaction boundaries."),
+    ("AS-02", "manual_rollback",
+     compile_pattern(r"\brollback\s*\("),
+     "transactions", "RED",
+     "Manual rollback() detected; violates managed transaction boundaries."),
+    ("AS-02", "mbo_save",
+     compile_pattern(r"\.save\s*\("),
+     "transactions", "AMBER",
+     "save() call detected; validate it is framework-safe and bounded."),
 
-    # Workflow manipulation heuristics (adjustable)
-    ("AS-06", "workflow_keywords", re.compile(r"\bWF\w+\b|\bworkflow\b", re.I),
-     "workflow", "AMBER", "Workflow-related code detected; validate idempotency and retries."),
+    ("AS-06", "workflow_keywords",
+     compile_pattern(r"\bWF\w+\b|\bworkflow\b"),
+     "workflow", "AMBER",
+     "Workflow-related code detected; validate idempotency and retries."),
 ]
 
 def scan_script(source_text):
@@ -151,28 +253,30 @@ def scan_script(source_text):
 
     findings = []
     signals = set()
-
-    # collect per pattern hits (with snippet limits)
     per_script_snip_count = 0
 
-    for (check_id, pname, regex, bucket, severity, desc) in CHECKS:
-        for m in regex.finditer(source_text):
-            # treat SIG-* as signals only (not surfaced as findings by default)
-            if check_id.startswith("SIG-"):
-                signals.add(pname)
-            else:
-                if per_script_snip_count < MAX_SNIPPETS_PER_SCRIPT:
-                    findings.append({
-                        "checkId": check_id,
-                        "pattern": pname,
-                        "severity": severity,
-                        "description": desc,
-                        "snippet": snippet_around(source_text, m.start(), m.end(), CONTEXT_WINDOW)
-                    })
-                    per_script_snip_count += 1
-            # only need one signal record per script
-            if check_id.startswith("SIG-"):
+    for (check_id, pname, jpat, bucket, severity, desc) in CHECKS:
+        matches = find_matches(jpat, source_text)
+
+        if not matches:
+            continue
+
+        if check_id.startswith("SIG-"):
+            # Only need to record once per script
+            signals.add(pname)
+            continue
+
+        for (st, en) in matches:
+            if per_script_snip_count >= MAX_SNIPPETS_PER_SCRIPT:
                 break
+            findings.append({
+                "checkId": check_id,
+                "pattern": pname,
+                "severity": severity,
+                "description": desc,
+                "snippet": snippet_around(source_text, st, en, CONTEXT_WINDOW)
+            })
+            per_script_snip_count += 1
 
     return signals, findings
 
@@ -185,7 +289,7 @@ def derive_as09_severity(signals, findings):
     """
     has_as09 = False
     for f in findings:
-        if f["checkId"] == "AS-09":
+        if f.get("checkId") == "AS-09":
             has_as09 = True
             break
     if not has_as09:
@@ -195,9 +299,9 @@ def derive_as09_severity(signals, findings):
     has_heavy = ("iteration" in signals) or ("count_call" in signals)
     has_sys = ("system_userinfo" in signals)
 
-    # Decide final severity for AS-09 findings
     final = "AMBER"
     rationale = "MXServer getMboSet chain detected; review for bounding filters."
+
     if (has_sys or (not has_filter)) and has_heavy:
         final = "RED"
         rationale = "MXServer.getMboSet appears unbounded (no filter) and is iterated/counted; high OOM/DB risk in MAS9 pods."
@@ -205,16 +309,13 @@ def derive_as09_severity(signals, findings):
         final = "AMBER"
         rationale = "MXServer.getMboSet detected but filters/maxRows appear present; verify correctness and reset ordering."
 
-    # Apply to AS-09 findings
     for f in findings:
-        if f["checkId"] == "AS-09":
+        if f.get("checkId") == "AS-09":
             f["severity"] = final
             f["description"] = f["description"] + " " + rationale
 
 def collect_launchpoints(ms_launch):
-    """
-    Build mapping: AUTOSCRIPT -> list of launch point descriptors
-    """
+    """Build mapping: AUTOSCRIPT -> list of launch point descriptors."""
     mapping = {}
     try:
         ms_launch.reset()
@@ -248,6 +349,9 @@ def main():
     ms_launch = None
 
     try:
+        # Optional: prove this revision is running
+        # service.log("MAS9_AUTOSCRIPT_INVENTORY java-regex build=2026-02-04")
+
         mx = MXServer.getMXServer()
         ui = mx.getSystemUserInfo()
 
@@ -259,11 +363,9 @@ def main():
 
         launch_map = collect_launchpoints(ms_launch)
 
-        # Per-check counts (per script, dedup)
-        check_counts = {}   # checkId -> count of scripts triggering it
+        check_counts = {}   # checkId -> count of scripts triggering it (per script, dedup)
         severity_counts = {"RED": 0, "AMBER": 0, "GREEN": 0}
 
-        # Bucket counts (per script, dedup)
         buckets = {
             "runtime_state": 0,
             "memory_db": 0,
@@ -293,28 +395,25 @@ def main():
                 derive_as09_severity(signals, findings)
 
                 if findings:
-                    # Deduplicate per script by checkId and by bucket
                     per_script_checks = set()
                     per_script_buckets = set()
                     worst = "GREEN"
 
                     for f in findings:
-                        per_script_checks.add(f["checkId"])
+                        per_script_checks.add(f.get("checkId"))
 
-                        # determine bucket for this finding (lookup from CHECKS)
-                        # (simple map build on the fly)
-                        for (cid, pname, regex, bucket, sev, desc) in CHECKS:
-                            if cid == f["checkId"] and pname == f["pattern"]:
+                        # Determine bucket for this finding
+                        for (cid, pname, _jpat, bucket, _sev, _desc) in CHECKS:
+                            if cid == f.get("checkId") and pname == f.get("pattern"):
                                 if bucket in buckets:
                                     per_script_buckets.add(bucket)
                                 break
 
-                        if f["severity"] == "RED":
+                        if f.get("severity") == "RED":
                             worst = "RED"
-                        elif f["severity"] == "AMBER" and worst != "RED":
+                        elif f.get("severity") == "AMBER" and worst != "RED":
                             worst = "AMBER"
 
-                    # increment counts per script
                     for cid in per_script_checks:
                         check_counts[cid] = check_counts.get(cid, 0) + 1
 
@@ -323,7 +422,6 @@ def main():
 
                     severity_counts[worst] = severity_counts.get(worst, 0) + 1
 
-                    # store details for a limited number of scripts
                     if scripts_with_findings < MAX_SAMPLE_FINDINGS:
                         detailed_findings.append({
                             "autoscript": script_name,
@@ -336,12 +434,10 @@ def main():
                         scripts_with_findings += 1
 
             except:
-                # keep scanning
                 pass
 
             s = ms_autoscript.moveNext()
 
-        # Executive-ish recommendation text (high value for migration)
         recommendations = [
             "Prioritise remediation of RED findings first (OS exec, threading, unbounded MXServer getMboSet, JDBC, hard-coded secrets).",
             "For MXServer.getMboSet usage: ensure setWhere/setQbe + reset ordering, use setMaxRows where possible, and avoid system user unless required.",
@@ -370,7 +466,8 @@ def main():
             "recommendations": recommendations
         }
 
-        payload = json.dumps(report, indent=2)
+        obj = to_ibm_json(report)
+        payload = serialize_ibm_json(obj)
 
         if OUTPUT_MODE == "FILE":
             try:
@@ -378,7 +475,6 @@ def main():
                 f.write(payload)
                 f.close()
             except:
-                # fall back to log
                 service.log(payload)
         else:
             service.log(payload)
